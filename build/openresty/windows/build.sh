@@ -111,6 +111,11 @@ if (( ${#local_patches[@]} > 0 )); then
     done
 fi
 
+if ! grep -q -- '--platform=msys' "$source_dir/util/build-win32.sh"; then
+    perl -0pi -e 's#\n\./configure \\\n#\n./configure \\\n    --platform=msys \\\n#' \
+        "$source_dir/util/build-win32.sh"
+fi
+
 cd "$source_dir"
 
 openssl_version=$(extract_upstream_var OPENSSL)
