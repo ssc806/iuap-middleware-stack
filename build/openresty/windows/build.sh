@@ -14,6 +14,57 @@ to_unix_path() {
     cygpath -u "$1"
 }
 
+extract_upstream_var() {
+    local key=$1
+
+    awk -F= -v key="$key" '
+        $1 == key {
+            gsub(/[[:space:]]/, "", $2)
+            print $2
+            exit
+        }
+    ' util/build-win32.sh
+}
+
+is_valid_targz() {
+    local archive_path=$1
+    tar -tzf "$archive_path" >/dev/null 2>&1
+}
+
+download_targz() {
+    local archive_path=$1
+    shift
+
+    local tmp_path
+    tmp_path="${archive_path}.tmp"
+
+    rm -f "$tmp_path"
+
+    for url in "$@"; do
+        if curl -fL "$url" -o "$tmp_path" && is_valid_targz "$tmp_path"; then
+            mv -f "$tmp_path" "$archive_path"
+            return 0
+        fi
+
+        rm -f "$tmp_path"
+    done
+
+    echo "failed to download a valid tar.gz archive for $archive_path" >&2
+    return 1
+}
+
+ensure_targz() {
+    local archive_path=$1
+    shift
+
+    if [[ -f "$archive_path" ]] && is_valid_targz "$archive_path"; then
+        return 0
+    fi
+
+    rm -f "$archive_path"
+    download_targz "$archive_path" "$@"
+}
+
 for required_var in \
     BUILD_ROOT \
     COMPONENT \
@@ -40,9 +91,7 @@ package_path=$(to_unix_path "$PACKAGE_FILE_PATH")
 
 mkdir -p "$build_root" "$artifact_dir"
 
-if [[ ! -f "$source_archive_path" ]]; then
-    curl -fL "$SOURCE_URL" -o "$source_archive_path"
-fi
+ensure_targz "$source_archive_path" "$SOURCE_URL"
 
 rm -rf "$source_dir"
 tar -xzf "$source_archive_path" -C "$build_root"
@@ -63,6 +112,21 @@ if (( ${#local_patches[@]} > 0 )); then
 fi
 
 cd "$source_dir"
+
+openssl_version=$(extract_upstream_var OPENSSL)
+zlib_version=$(extract_upstream_var ZLIB)
+pcre_version=$(extract_upstream_var PCRE)
+
+ensure_targz "$build_root/${openssl_version}.tar.gz" \
+    "https://github.com/openssl/openssl/releases/download/${openssl_version}/${openssl_version}.tar.gz"
+
+ensure_targz "$build_root/${zlib_version}.tar.gz" \
+    "https://www.zlib.net/fossils/${zlib_version}.tar.gz" \
+    "https://zlib.net/fossils/${zlib_version}.tar.gz"
+
+ensure_targz "$build_root/${pcre_version}.tar.gz" \
+    "https://github.com/PCRE2Project/pcre2/releases/download/${pcre_version}/${pcre_version}.tar.gz"
+
 ./util/build-win32.sh
 
 package_with_upstream() {
