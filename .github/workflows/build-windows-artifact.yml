@@ -1,0 +1,102 @@
+name: Build Windows Middleware Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Component to build
+        required: true
+        default: openresty
+        type: choice
+        options:
+          - openresty
+      version:
+        description: Override source version. Leave empty to use the tag-derived or configured default version.
+        required: false
+        type: string
+      artifact_retention_days:
+        description: Override artifact retention days. Leave empty to use the configured default.
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+    tags:
+      - openresty-v*
+    paths:
+      - .github/workflows/build-windows-artifact.yml
+      - build/**
+      - configs/**
+      - patches/**
+      - docs/**
+      - README.md
+
+jobs:
+  build:
+    name: Build Windows artifact
+    runs-on: windows-2022
+    permissions:
+      contents: read
+    env:
+      INPUT_COMPONENT: ${{ github.event.inputs.component || 'openresty' }}
+      INPUT_VERSION: ${{ github.event.inputs.version || '' }}
+      INPUT_ARTIFACT_RETENTION_DAYS: ${{ github.event.inputs.artifact_retention_days || '' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve build metadata
+        id: resolve
+        shell: pwsh
+        run: |
+          ./build/windows/resolve-build.ps1 `
+            -Component "$env:INPUT_COMPONENT" `
+            -Version "$env:INPUT_VERSION" `
+            -ArtifactRetentionDays "$env:INPUT_ARTIFACT_RETENTION_DAYS"
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            curl
+            diffutils
+            dos2unix
+            make
+            patch
+            perl
+            tar
+            wget
+            zip
+            mingw-w64-x86_64-gcc
+
+      - name: Build and package component
+        shell: msys2 {0}
+        run: |
+          bash "$(cygpath -u "$BUILD_SCRIPT")"
+
+      - name: Write build summary
+        shell: pwsh
+        run: |
+          $lines = @(
+            "## Windows build",
+            "",
+            "- Component: $env:COMPONENT",
+            "- Version: $env:COMPONENT_VERSION",
+            "- Source: $env:SOURCE_URL",
+            "- Runner: windows-2022",
+            "- Toolchain: MSYS2 MINGW64",
+            "- Uploaded artifact: $env:ARTIFACT_BUNDLE_NAME",
+            "- Workspace staging path: $env:ARTIFACT_UPLOAD_PATH"
+          )
+
+          $lines -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.resolve.outputs.artifact_bundle_name }}
+          path: ${{ steps.resolve.outputs.artifact_upload_path }}
+          if-no-files-found: error
+          retention-days: ${{ steps.resolve.outputs.artifact_retention_days }}
