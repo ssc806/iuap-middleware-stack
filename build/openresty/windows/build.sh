@@ -2,6 +2,46 @@
 
 set -euo pipefail
 
+# This is the full OpenResty/nginx configure argument list for Windows builds.
+# Edit, remove, or reorder entries here when you need to change the build.
+# Entries are written into the generated shell script as-is.
+configure_args=(
+    "--platform=msys"
+    "--with-cc=gcc"
+    "--prefix="
+    "--with-cc-opt=-DFD_SETSIZE=1024"
+    "--sbin-path=nginx.exe"
+    "--with-pcre-jit"
+    "--without-http_rds_json_module"
+    "--without-http_rds_csv_module"
+    "--without-lua_rds_parser"
+    "--with-ipv6"
+    "--with-stream"
+    "--with-stream_ssl_module"
+    "--with-stream_ssl_preread_module"
+    "--with-http_v2_module"
+    "--without-mail_pop3_module"
+    "--without-mail_imap_module"
+    "--without-mail_smtp_module"
+    "--with-http_stub_status_module"
+    "--with-http_realip_module"
+    "--with-http_addition_module"
+    "--with-http_auth_request_module"
+    "--with-http_secure_link_module"
+    "--with-http_random_index_module"
+    "--with-http_gzip_static_module"
+    "--with-http_sub_module"
+    "--with-http_dav_module"
+    "--with-http_flv_module"
+    "--with-http_mp4_module"
+    "--with-http_gunzip_module"
+    "--with-select_module"
+    '--with-luajit-xcflags="-DLUAJIT_NUMMODE=2 -DLUAJIT_ENABLE_LUA52COMPAT"'
+    '--with-pcre=objs/lib/$PCRE'
+    '--with-zlib=objs/lib/$ZLIB'
+    '--with-openssl=objs/lib/$OPENSSL'
+)
+
 require_var() {
     local name=$1
     if [[ -z "${!name:-}" ]]; then
@@ -65,6 +105,61 @@ ensure_targz() {
     download_targz "$archive_path" "$@"
 }
 
+replace_configure_invocation() {
+    local script_path=$1
+    local tmp_path=$2
+    local block_path configure_block arg
+
+    configure_block='./configure \'
+    configure_block+=$'\n'
+
+    for arg in "${configure_args[@]}"; do
+        configure_block+="    ${arg} \\"$'\n'
+    done
+
+    configure_block+='    -j$JOBS || exit 1'
+    configure_block+=$'\n'
+
+    block_path="${tmp_path}.block"
+    printf '%s' "$configure_block" > "$block_path"
+
+    if ! awk -v block_path="$block_path" '
+        function print_block(    line) {
+            while ((getline line < block_path) > 0) {
+                print line
+            }
+            close(block_path)
+        }
+
+        $0 == "./configure \\" && replaced == 0 {
+            print_block()
+            replaced = 1
+            in_block = 1
+            next
+        }
+
+        in_block {
+            if ($0 ~ /-j\$JOBS \|\| exit 1$/) {
+                in_block = 0
+            }
+            next
+        }
+
+        { print }
+
+        END {
+            if (replaced == 0 || in_block != 0) {
+                exit 1
+            }
+        }
+    ' "$script_path" > "$tmp_path"; then
+        rm -f "$block_path"
+        return 1
+    fi
+
+    rm -f "$block_path"
+}
+
 for required_var in \
     BUILD_ROOT \
     COMPONENT \
@@ -111,10 +206,9 @@ if (( ${#local_patches[@]} > 0 )); then
     done
 fi
 
-if ! grep -q -- '--platform=msys' "$source_dir/util/build-win32.sh"; then
-    perl -0pi -e 's#\n\./configure \\\n#\n./configure \\\n    --platform=msys \\\n#' \
-        "$source_dir/util/build-win32.sh"
-fi
+tmp_build_script="${source_dir}/util/build-win32.sh.tmp"
+replace_configure_invocation "$source_dir/util/build-win32.sh" "$tmp_build_script"
+mv -f "$tmp_build_script" "$source_dir/util/build-win32.sh"
 
 cd "$source_dir"
 
