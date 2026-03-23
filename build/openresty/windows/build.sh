@@ -38,7 +38,7 @@ configure_args=(
     "--with-http_slice_module"
     "--with-compat"
     "--with-http_image_filter_module"
-    '--with-cc="ccache gcc -fdiagnostics-color=always"'
+    '--with-cc="gcc -fdiagnostics-color=always"'
     '--with-cc-opt="-DFD_SETSIZE=1024 -m64"'
     '--with-ld-opt="-Wl,-rpath,$(pwd)/build/luajit-root/luajit/lib"'
     '--with-luajit-xcflags="-DLUAJIT_NUMMODE=2 -DLUAJIT_ENABLE_LUA52COMPAT"'
@@ -198,25 +198,6 @@ ensure_targz "$source_archive_path" "$SOURCE_URL"
 rm -rf "$source_dir"
 tar -xzf "$source_archive_path" -C "$build_root"
 
-# 定义额外模块版本
-nginx_module_vts="nginx-module-vts-0.2.2"
-nginx_module_check="nginx_upstream_check_module-0.4.0"
-lua_resty_http="lua-resty-http-0.17.2"
-
-# 下载额外模块
-ensure_targz "$build_root/${nginx_module_vts}.tar.gz" \
-    "https://github.com/vozlt/nginx-module-vts/archive/v0.2.2.tar.gz"
-
-ensure_targz "$build_root/${nginx_module_check}.tar.gz" \
-    "https://github.com/yaoweibin/nginx_upstream_check_module/archive/v0.4.0.tar.gz"
-
-ensure_targz "$build_root/${lua_resty_http}.tar.gz" \
-    "https://github.com/ledgetech/lua-resty-http/archive/v0.17.2.tar.gz"
-
-# 解压额外模块
-tar -xzf "$build_root/${nginx_module_vts}.tar.gz" -C "$build_root"
-tar -xzf "$build_root/${nginx_module_check}.tar.gz" -C "$build_root"
-tar -xzf "$build_root/${lua_resty_http}.tar.gz" -C "$build_root"
 
 if [[ ! -d "$source_dir" ]]; then
     echo "source directory was not created after extracting $SOURCE_ARCHIVE_NAME" >&2
@@ -242,8 +223,7 @@ cd "$source_dir"
 openssl_version=$(extract_upstream_var OPENSSL)
 zlib_version=$(extract_upstream_var ZLIB)
 pcre_version=$(extract_upstream_var PCRE)
-
-# 额外模块版本定义
+# 定义额外模块版本
 nginx_module_vts="nginx-module-vts-0.2.2"
 nginx_module_check="nginx_upstream_check_module-0.4.0"
 lua_resty_http="lua-resty-http-0.17.2"
@@ -267,6 +247,11 @@ ensure_targz "$build_root/${nginx_module_check}.tar.gz" \
 
 ensure_targz "$build_root/${lua_resty_http}.tar.gz" \
     "https://github.com/ledgetech/lua-resty-http/archive/v0.17.2.tar.gz"
+
+# 解压额外模块
+tar -xzf "$build_root/${nginx_module_vts}.tar.gz" -C "$build_root"
+tar -xzf "$build_root/${nginx_module_check}.tar.gz" -C "$build_root"
+tar -xzf "$build_root/${lua_resty_http}.tar.gz" -C "$build_root"
 
 ./util/build-win32.sh
 
