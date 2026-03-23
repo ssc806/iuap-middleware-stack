@@ -198,11 +198,22 @@ ensure_targz "$source_archive_path" "$SOURCE_URL"
 rm -rf "$source_dir"
 tar -xzf "$source_archive_path" -C "$build_root"
 
-# 解压额外模块
+# 定义额外模块版本
 nginx_module_vts="nginx-module-vts-0.2.2"
 nginx_module_check="nginx_upstream_check_module-0.4.0"
 lua_resty_http="lua-resty-http-0.17.2"
 
+# 下载额外模块
+ensure_targz "$build_root/${nginx_module_vts}.tar.gz" \
+    "https://github.com/vozlt/nginx-module-vts/archive/v0.2.2.tar.gz"
+
+ensure_targz "$build_root/${nginx_module_check}.tar.gz" \
+    "https://github.com/yaoweibin/nginx_upstream_check_module/archive/v0.4.0.tar.gz"
+
+ensure_targz "$build_root/${lua_resty_http}.tar.gz" \
+    "https://github.com/ledgetech/lua-resty-http/archive/v0.17.2.tar.gz"
+
+# 解压额外模块
 tar -xzf "$build_root/${nginx_module_vts}.tar.gz" -C "$build_root"
 tar -xzf "$build_root/${nginx_module_check}.tar.gz" -C "$build_root"
 tar -xzf "$build_root/${lua_resty_http}.tar.gz" -C "$build_root"
