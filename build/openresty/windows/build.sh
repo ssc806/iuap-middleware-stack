@@ -151,6 +151,39 @@ apply_local_patches() {
     done
 }
 
+apply_module_patches() {
+    local module_dir=$1
+    local patch_dir=$2
+    local patches=()
+    local patch_level
+
+    if [[ ! -d "$patch_dir" ]]; then
+        return 0
+    fi
+
+    shopt -s nullglob
+    patches=("$patch_dir"/*.patch)
+    shopt -u nullglob
+
+    for patch_file in "${patches[@]}"; do
+        patch_level=
+
+        for candidate_level in 1 0; do
+            if patch --dry-run -d "$module_dir" "-p${candidate_level}" < "$patch_file" >/dev/null 2>&1; then
+                patch_level=$candidate_level
+                break
+            fi
+        done
+
+        if [[ -z "$patch_level" ]]; then
+            echo "failed to determine patch level for $patch_file" >&2
+            return 1
+        fi
+
+        patch -d "$module_dir" "-p${patch_level}" < "$patch_file"
+    done
+}
+
 apply_upstream_check_patch() {
     local nginx_source_dir=$1
     local module_dir=$2
@@ -409,6 +442,7 @@ ensure_targz "$build_root/${pcre_version}.tar.gz" \
     "https://github.com/PCRE2Project/pcre2/releases/download/${pcre_version}/${pcre_version}.tar.gz"
 
 custom_module_root="$source_dir/custom-modules"
+module_patch_root="${patch_dir}/modules"
 mkdir -p "$custom_module_root"
 
 vts_archive="$build_root/nginx-module-vts-${NGINX_MODULE_VTS_VERSION}.tar.gz"
@@ -432,6 +466,14 @@ ensure_extracted_module \
     "lua-resty-http-${LUA_RESTY_HTTP_VERSION}" \
     "$custom_module_root" \
     "https://github.com/ledgetech/lua-resty-http/archive/refs/tags/${LUA_RESTY_HTTP_TAG}.tar.gz"
+
+apply_module_patches \
+    "$custom_module_root/nginx-module-vts-${NGINX_MODULE_VTS_VERSION}" \
+    "$module_patch_root/nginx-module-vts-${NGINX_MODULE_VTS_VERSION}"
+
+apply_module_patches \
+    "$custom_module_root/nginx_upstream_check_module-${NGINX_UPSTREAM_CHECK_VERSION}" \
+    "$module_patch_root/nginx_upstream_check_module-${NGINX_UPSTREAM_CHECK_VERSION}"
 
 nginx_source_dir=$(find_single_directory "$source_dir/bundle/nginx-*")
 apply_upstream_check_patch \
