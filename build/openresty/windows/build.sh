@@ -9,6 +9,8 @@ readonly NGINX_UPSTREAM_CHECK_TAG="v${NGINX_UPSTREAM_CHECK_VERSION}"
 readonly LUA_RESTY_HTTP_VERSION="0.17.2"
 readonly LUA_RESTY_HTTP_TAG="v${LUA_RESTY_HTTP_VERSION}"
 
+declare -a configure_args=()
+
 require_var() {
     local name=$1
     if [[ -z "${!name:-}" ]]; then
@@ -77,7 +79,6 @@ extract_tarball_to_named_dir() {
     local archive_path=$1
     local parent_dir=$2
     local expected_dir=$3
-
     local tmp_extract extracted_entries extracted_dir
 
     tmp_extract="${parent_dir}/.${expected_dir}.extract"
@@ -154,13 +155,14 @@ apply_upstream_check_patch() {
     local nginx_source_dir=$1
     local module_dir=$2
     local patch_path="${module_dir}/check_1.20.1+.patch"
+    local guard_path="${nginx_source_dir}/src/http/ngx_http_upstream_round_robin.h"
 
     if [[ ! -f "$patch_path" ]]; then
         echo "missing upstream check patch: $patch_path" >&2
         return 1
     fi
 
-    if rg -q "check_index" "$nginx_source_dir/src/http/ngx_http_upstream_round_robin.h"; then
+    if grep -q "check_index" "$guard_path"; then
         return 0
     fi
 
@@ -177,54 +179,105 @@ stage_lua_resty_http() {
     cp -f "${module_dir}/lib/resty/http_headers.lua" "${target_dir}/resty/"
 }
 
-run_configure() {
-    local jobs=$1
-    local pcre_dir=$2
-    local zlib_dir=$3
-    local openssl_dir=$4
-    local luajit_lib_dir=$5
+build_configure_args() {
+    local custom_module_root=$1
 
-    ./configure \
-        --with-cc='gcc -fdiagnostics-color=always' \
-        --prefix= \
-        --sbin-path=nginx.exe \
-        --with-pcre-jit \
-        --without-http_rds_json_module \
-        --without-http_rds_csv_module \
-        --without-lua_rds_parser \
-        --with-ipv6 \
-        --with-stream \
-        --with-stream_ssl_module \
-        --with-stream_ssl_preread_module \
-        --with-http_v2_module \
-        --without-mail_pop3_module \
-        --without-mail_imap_module \
-        --without-mail_smtp_module \
-        --with-http_stub_status_module \
-        --with-http_realip_module \
-        --with-http_addition_module \
-        --with-http_auth_request_module \
-        --with-http_secure_link_module \
-        --with-http_random_index_module \
-        --with-http_gzip_static_module \
-        --with-http_sub_module \
-        --with-http_dav_module \
-        --with-http_flv_module \
-        --with-http_mp4_module \
-        --with-http_gunzip_module \
-        --with-select_module \
-        --with-http_slice_module \
-        --with-compat \
-        --with-http_image_filter_module \
-        --with-cc-opt='-DFD_SETSIZE=1024 -m64' \
-        --with-ld-opt="-Wl,-rpath,${luajit_lib_dir}" \
-        --with-luajit-xcflags='-DLUAJIT_NUMMODE=2 -DLUAJIT_ENABLE_LUA52COMPAT' \
-        --with-pcre="$pcre_dir" \
-        --with-zlib="$zlib_dir" \
-        --with-openssl="$openssl_dir" \
-        --add-module="objs/nginx-module-vts-${NGINX_MODULE_VTS_VERSION}" \
-        --add-module="objs/nginx_upstream_check_module-${NGINX_UPSTREAM_CHECK_VERSION}" \
-        -j"$jobs"
+    configure_args=(
+        "--platform=msys"
+        "--with-cc=gcc"
+        "--prefix="
+        '--with-cc-opt="-DFD_SETSIZE=1024 -m64 -fdiagnostics-color=always"'
+        "--sbin-path=nginx.exe"
+        "--with-pcre-jit"
+        "--without-http_rds_json_module"
+        "--without-http_rds_csv_module"
+        "--without-lua_rds_parser"
+        "--with-ipv6"
+        "--with-stream"
+        "--with-stream_ssl_module"
+        "--with-stream_ssl_preread_module"
+        "--with-http_v2_module"
+        "--without-mail_pop3_module"
+        "--without-mail_imap_module"
+        "--without-mail_smtp_module"
+        "--with-http_stub_status_module"
+        "--with-http_realip_module"
+        "--with-http_addition_module"
+        "--with-http_auth_request_module"
+        "--with-http_secure_link_module"
+        "--with-http_random_index_module"
+        "--with-http_gzip_static_module"
+        "--with-http_sub_module"
+        "--with-http_dav_module"
+        "--with-http_flv_module"
+        "--with-http_mp4_module"
+        "--with-http_gunzip_module"
+        "--with-select_module"
+        "--with-http_slice_module"
+        "--with-compat"
+        "--with-http_image_filter_module"
+        '--with-luajit-xcflags="-DLUAJIT_NUMMODE=2 -DLUAJIT_ENABLE_LUA52COMPAT"'
+        '--with-pcre=objs/lib/$PCRE'
+        '--with-zlib=objs/lib/$ZLIB'
+        '--with-openssl=objs/lib/$OPENSSL'
+        "--add-module=${custom_module_root}/nginx-module-vts-${NGINX_MODULE_VTS_VERSION}"
+        "--add-module=${custom_module_root}/nginx_upstream_check_module-${NGINX_UPSTREAM_CHECK_VERSION}"
+    )
+}
+
+replace_configure_invocation() {
+    local script_path=$1
+    local tmp_path=$2
+    local block_path configure_block arg
+
+    configure_block='./configure \'
+    configure_block+=$'\n'
+
+    for arg in "${configure_args[@]}"; do
+        configure_block+="    ${arg} \\"$'\n'
+    done
+
+    configure_block+='    -j$JOBS || exit 1'
+    configure_block+=$'\n'
+
+    block_path="${tmp_path}.block"
+    printf '%s' "$configure_block" > "$block_path"
+
+    if ! awk -v block_path="$block_path" '
+        function print_block(    line) {
+            while ((getline line < block_path) > 0) {
+                print line
+            }
+            close(block_path)
+        }
+
+        $0 == "./configure \\" && replaced == 0 {
+            print_block()
+            replaced = 1
+            in_block = 1
+            next
+        }
+
+        in_block {
+            if ($0 ~ /-j\$JOBS \|\| exit 1$/) {
+                in_block = 0
+            }
+            next
+        }
+
+        { print }
+
+        END {
+            if (replaced == 0 || in_block != 0) {
+                exit 1
+            }
+        }
+    ' "$script_path" > "$tmp_path"; then
+        rm -f "$block_path"
+        return 1
+    fi
+
+    rm -f "$block_path"
 }
 
 package_with_upstream() {
@@ -344,7 +397,6 @@ build_script_path="$source_dir/util/build-win32.sh"
 openssl_version=$(extract_upstream_var "$build_script_path" "OPENSSL")
 zlib_version=$(extract_upstream_var "$build_script_path" "ZLIB")
 pcre_version=$(extract_upstream_var "$build_script_path" "PCRE")
-jobs=$(extract_upstream_var "$build_script_path" "JOBS")
 
 ensure_targz "$build_root/${openssl_version}.tar.gz" \
     "https://github.com/openssl/openssl/releases/download/${openssl_version}/${openssl_version}.tar.gz"
@@ -356,61 +408,48 @@ ensure_targz "$build_root/${zlib_version}.tar.gz" \
 ensure_targz "$build_root/${pcre_version}.tar.gz" \
     "https://github.com/PCRE2Project/pcre2/releases/download/${pcre_version}/${pcre_version}.tar.gz"
 
+custom_module_root="$source_dir/custom-modules"
+mkdir -p "$custom_module_root"
+
 vts_archive="$build_root/nginx-module-vts-${NGINX_MODULE_VTS_VERSION}.tar.gz"
 upstream_check_archive="$build_root/nginx_upstream_check_module-${NGINX_UPSTREAM_CHECK_VERSION}.tar.gz"
 lua_resty_http_archive="$build_root/lua-resty-http-${LUA_RESTY_HTTP_VERSION}.tar.gz"
 
-cd "$source_dir"
-rm -rf objs
-mkdir -p objs/lib
-
 ensure_extracted_module \
     "$vts_archive" \
     "nginx-module-vts-${NGINX_MODULE_VTS_VERSION}" \
-    "$source_dir/objs" \
+    "$custom_module_root" \
     "https://github.com/vozlt/nginx-module-vts/archive/refs/tags/${NGINX_MODULE_VTS_TAG}.tar.gz"
 
 ensure_extracted_module \
     "$upstream_check_archive" \
     "nginx_upstream_check_module-${NGINX_UPSTREAM_CHECK_VERSION}" \
-    "$source_dir/objs" \
+    "$custom_module_root" \
     "https://github.com/yaoweibin/nginx_upstream_check_module/archive/refs/tags/${NGINX_UPSTREAM_CHECK_TAG}.tar.gz"
 
 ensure_extracted_module \
     "$lua_resty_http_archive" \
     "lua-resty-http-${LUA_RESTY_HTTP_VERSION}" \
-    "$source_dir/objs" \
+    "$custom_module_root" \
     "https://github.com/ledgetech/lua-resty-http/archive/refs/tags/${LUA_RESTY_HTTP_TAG}.tar.gz"
 
-(
-    cd objs/lib
-    tar -xzf "../../../${openssl_version}.tar.gz"
-    tar -xzf "../../../${zlib_version}.tar.gz"
-    tar -xzf "../../../${pcre_version}.tar.gz"
-)
-
-(
-    cd "objs/lib/${openssl_version}"
-    patch -p1 < "../../../patches/${openssl_version}-sess_set_get_cb_yield.patch"
-)
-
 nginx_source_dir=$(find_single_directory "$source_dir/bundle/nginx-*")
-apply_upstream_check_patch "$nginx_source_dir" "$source_dir/objs/nginx_upstream_check_module-${NGINX_UPSTREAM_CHECK_VERSION}"
-stage_lua_resty_http "$source_dir/objs/lua-resty-http-${LUA_RESTY_HTTP_VERSION}" "$source_dir/lualib"
+apply_upstream_check_patch \
+    "$nginx_source_dir" \
+    "$custom_module_root/nginx_upstream_check_module-${NGINX_UPSTREAM_CHECK_VERSION}"
 
-luajit_lib_dir="$source_dir/build/luajit-root/luajit/lib"
+build_configure_args "$custom_module_root"
 
-run_configure \
-    "$jobs" \
-    "objs/lib/${pcre_version}" \
-    "objs/lib/${zlib_version}" \
-    "objs/lib/${openssl_version}" \
-    "$luajit_lib_dir"
+tmp_build_script="${source_dir}/util/build-win32.sh.tmp"
+replace_configure_invocation "$source_dir/util/build-win32.sh" "$tmp_build_script"
+mv -f "$tmp_build_script" "$source_dir/util/build-win32.sh"
 
-make -j"$jobs"
-make install
+cd "$source_dir"
+./util/build-win32.sh
 
-stage_lua_resty_http "$source_dir/objs/lua-resty-http-${LUA_RESTY_HTTP_VERSION}" "$source_dir/lualib"
+stage_lua_resty_http \
+    "$custom_module_root/lua-resty-http-${LUA_RESTY_HTTP_VERSION}" \
+    "$source_dir/lualib"
 
 if ! package_with_upstream "$package_path"; then
     package_fallback "$build_root" "$PACKAGE_FILE_NAME" "$package_path"
