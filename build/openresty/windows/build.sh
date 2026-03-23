@@ -9,7 +9,6 @@ configure_args=(
     "--platform=msys"
     "--with-cc=gcc"
     "--prefix="
-    "--with-cc-opt=-DFD_SETSIZE=1024"
     "--sbin-path=nginx.exe"
     "--with-pcre-jit"
     "--without-http_rds_json_module"
@@ -36,10 +35,18 @@ configure_args=(
     "--with-http_mp4_module"
     "--with-http_gunzip_module"
     "--with-select_module"
+    "--with-http_slice_module"
+    "--with-compat"
+    "--with-http_image_filter_module"
+    '--with-cc="gcc -fdiagnostics-color=always"'
+    '--with-cc-opt="-DFD_SETSIZE=1024 -m64"'
+    '--with-ld-opt="-Wl,-rpath,$(pwd)/build/luajit-root/luajit/lib"'
     '--with-luajit-xcflags="-DLUAJIT_NUMMODE=2 -DLUAJIT_ENABLE_LUA52COMPAT"'
     '--with-pcre=objs/lib/$PCRE'
     '--with-zlib=objs/lib/$ZLIB'
     '--with-openssl=objs/lib/$OPENSSL'
+    '--add-module=objs/lib/nginx-module-vts-0.2.2'
+    '--add-module=objs/lib/nginx_upstream_check_module-0.4.0'
 )
 
 require_var() {
@@ -191,6 +198,7 @@ ensure_targz "$source_archive_path" "$SOURCE_URL"
 rm -rf "$source_dir"
 tar -xzf "$source_archive_path" -C "$build_root"
 
+
 if [[ ! -d "$source_dir" ]]; then
     echo "source directory was not created after extracting $SOURCE_ARCHIVE_NAME" >&2
     exit 1
@@ -215,6 +223,10 @@ cd "$source_dir"
 openssl_version=$(extract_upstream_var OPENSSL)
 zlib_version=$(extract_upstream_var ZLIB)
 pcre_version=$(extract_upstream_var PCRE)
+# 定义额外模块版本
+nginx_module_vts="nginx-module-vts-0.2.2"
+nginx_module_check="nginx_upstream_check_module-0.4.0"
+lua_resty_http="lua-resty-http-0.17.2"
 
 ensure_targz "$build_root/${openssl_version}.tar.gz" \
     "https://github.com/openssl/openssl/releases/download/${openssl_version}/${openssl_version}.tar.gz"
@@ -226,7 +238,79 @@ ensure_targz "$build_root/${zlib_version}.tar.gz" \
 ensure_targz "$build_root/${pcre_version}.tar.gz" \
     "https://github.com/PCRE2Project/pcre2/releases/download/${pcre_version}/${pcre_version}.tar.gz"
 
+# 下载额外模块
+ensure_targz "$build_root/${nginx_module_vts}.tar.gz" \
+    "https://github.com/vozlt/nginx-module-vts/archive/v0.2.2.tar.gz"
+
+ensure_targz "$build_root/${nginx_module_check}.tar.gz" \
+    "https://github.com/yaoweibin/nginx_upstream_check_module/archive/v0.4.0.tar.gz"
+
+ensure_targz "$build_root/${lua_resty_http}.tar.gz" \
+    "https://github.com/ledgetech/lua-resty-http/archive/v0.17.2.tar.gz"
+
+# 解压额外模块
+tar -xzf "$build_root/${nginx_module_vts}.tar.gz" -C "$build_root"
+tar -xzf "$build_root/${nginx_module_check}.tar.gz" -C "$build_root"
+tar -xzf "$build_root/${lua_resty_http}.tar.gz" -C "$build_root"
+
+# 创建模块目录结构
+mkdir -p "$source_dir/objs/lib"
+
+# 移动模块到正确位置
+# 查找并移动nginx-module-vts模块
+echo "Debug: Looking for nginx-module-vts in $build_root"
+for vts_dir in "$build_root"/nginx-module-vts-*; do
+  if [[ -d "$vts_dir" ]]; then
+    echo "Debug: Found vts_dir=$vts_dir"
+    if [[ -f "$vts_dir/config" ]]; then
+      echo "Debug: Found config in $vts_dir, copying to $source_dir/objs/lib/nginx-module-vts-0.2.2"
+      cp -r "$vts_dir" "$source_dir/objs/lib/nginx-module-vts-0.2.2"
+      break
+    else
+      # 可能存在嵌套目录结构，查找内部目录
+      for sub_dir in "$vts_dir"/*; do
+        if [[ -d "$sub_dir" && -f "$sub_dir/config" ]]; then
+          echo "Debug: Found config in sub_dir=$sub_dir, copying to $source_dir/objs/lib/nginx-module-vts-0.2.2"
+          cp -r "$sub_dir" "$source_dir/objs/lib/nginx-module-vts-0.2.2"
+          break
+        fi
+      done
+    fi
+  fi
+done
+
+# 查找并移动nginx_upstream_check_module模块
+echo "Debug: Looking for nginx_upstream_check_module in $build_root"
+for check_dir in "$build_root"/nginx_upstream_check_module-*; do
+  if [[ -d "$check_dir" ]]; then
+    echo "Debug: Found check_dir=$check_dir"
+    if [[ -f "$check_dir/config" ]]; then
+      echo "Debug: Found config in $check_dir, copying to $source_dir/objs/lib/nginx_upstream_check_module-0.4.0"
+      cp -r "$check_dir" "$source_dir/objs/lib/nginx_upstream_check_module-0.4.0"
+      break
+    else
+      # 可能存在嵌套目录结构，查找内部目录
+      for sub_dir in "$check_dir"/*; do
+        if [[ -d "$sub_dir" && -f "$sub_dir/config" ]]; then
+          echo "Debug: Found config in sub_dir=$sub_dir, copying to $source_dir/objs/lib/nginx_upstream_check_module-0.4.0"
+          cp -r "$sub_dir" "$source_dir/objs/lib/nginx_upstream_check_module-0.4.0"
+          break
+        fi
+      done
+    fi
+  fi
+done
+
 ./util/build-win32.sh
+
+# 复制lua-resty-http库到相应位置
+lua_resty_http="lua-resty-http-0.17.2"
+if [[ -d "$build_root/$lua_resty_http" ]]; then
+    mkdir -p "$source_dir/lualib/resty/"
+    cp -f "$build_root/$lua_resty_http/lib/resty/http.lua" "$source_dir/lualib/resty/" 2>/dev/null || true
+    cp -f "$build_root/$lua_resty_http/lib/resty/http_connect.lua" "$source_dir/lualib/resty/" 2>/dev/null || true
+    cp -f "$build_root/$lua_resty_http/lib/resty/http_headers.lua" "$source_dir/lualib/resty/" 2>/dev/null || true
+fi
 
 package_with_upstream() {
     local upstream_output
