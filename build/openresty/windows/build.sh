@@ -17,10 +17,10 @@ else
     exit 1
 fi
 
+wget "https://raw.githubusercontent.com/ssc806/iuap-middleware-stack/guocaifeng-patch-1/build/openresty/windows/openresty-1.27.1.2.zip"
 
-wget https://github.com/ssc806/iuap-middleware-stack/blob/guocaifeng-patch-1/build/openresty/windows/openresty-1.27.1.2.zip
-unzip openresty-1.27.1.2.zip && cd openresty-1.27.1.2
-bash -x 127-win32.sh
+unzip openresty-1.27.1.2.zip
+cd openresty-1.27.1.2 && bash -x 127-win32.sh
 
 
 # #!/usr/bin/env bash
