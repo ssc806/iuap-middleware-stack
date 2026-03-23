@@ -253,6 +253,54 @@ tar -xzf "$build_root/${nginx_module_vts}.tar.gz" -C "$build_root"
 tar -xzf "$build_root/${nginx_module_check}.tar.gz" -C "$build_root"
 tar -xzf "$build_root/${lua_resty_http}.tar.gz" -C "$build_root"
 
+# 创建模块目录结构
+mkdir -p "$build_root/objs/lib"
+
+# 移动模块到正确位置
+# 查找并移动nginx-module-vts模块
+echo "Debug: Looking for nginx-module-vts in $build_root"
+for vts_dir in "$build_root"/nginx-module-vts-*; do
+  if [[ -d "$vts_dir" ]]; then
+    echo "Debug: Found vts_dir=$vts_dir"
+    if [[ -f "$vts_dir/config" ]]; then
+      echo "Debug: Found config in $vts_dir, copying to $build_root/objs/lib/nginx-module-vts-0.2.2"
+      cp -r "$vts_dir" "$build_root/objs/lib/nginx-module-vts-0.2.2"
+      break
+    else
+      # 可能存在嵌套目录结构，查找内部目录
+      for sub_dir in "$vts_dir"/*; do
+        if [[ -d "$sub_dir" && -f "$sub_dir/config" ]]; then
+          echo "Debug: Found config in sub_dir=$sub_dir, copying to $build_root/objs/lib/nginx-module-vts-0.2.2"
+          cp -r "$sub_dir" "$build_root/objs/lib/nginx-module-vts-0.2.2"
+          break
+        fi
+      done
+    fi
+  fi
+done
+
+# 查找并移动nginx_upstream_check_module模块
+echo "Debug: Looking for nginx_upstream_check_module in $build_root"
+for check_dir in "$build_root"/nginx_upstream_check_module-*; do
+  if [[ -d "$check_dir" ]]; then
+    echo "Debug: Found check_dir=$check_dir"
+    if [[ -f "$check_dir/config" ]]; then
+      echo "Debug: Found config in $check_dir, copying to $build_root/objs/lib/nginx_upstream_check_module-0.4.0"
+      cp -r "$check_dir" "$build_root/objs/lib/nginx_upstream_check_module-0.4.0"
+      break
+    else
+      # 可能存在嵌套目录结构，查找内部目录
+      for sub_dir in "$check_dir"/*; do
+        if [[ -d "$sub_dir" && -f "$sub_dir/config" ]]; then
+          echo "Debug: Found config in sub_dir=$sub_dir, copying to $build_root/objs/lib/nginx_upstream_check_module-0.4.0"
+          cp -r "$sub_dir" "$build_root/objs/lib/nginx_upstream_check_module-0.4.0"
+          break
+        fi
+      done
+    fi
+  fi
+done
+
 ./util/build-win32.sh
 
 # 复制lua-resty-http库到相应位置
