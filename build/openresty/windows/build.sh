@@ -112,11 +112,17 @@ ensure_extracted_module() {
 
 find_single_directory() {
     local pattern=$1
-    local matches
+    local entries matches=()
 
     shopt -s nullglob
-    matches=($pattern)
+    entries=($pattern)
     shopt -u nullglob
+
+    for entry in "${entries[@]}"; do
+        if [[ -d "$entry" ]]; then
+            matches+=("$entry")
+        fi
+    done
 
     if (( ${#matches[@]} != 1 )); then
         echo "expected a single directory for pattern: $pattern" >&2
