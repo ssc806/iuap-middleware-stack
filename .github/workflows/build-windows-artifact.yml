@@ -64,7 +64,7 @@ jobs:
             diffutils
             dos2unix
             make
-            mingw-w64-x86_64-gd
+            mingw-w64-x86_64-libgd
             patch
             perl
             tar
